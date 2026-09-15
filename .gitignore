@@ -1,0 +1,21 @@
+# Python
+.venv/
+__pycache__/
+*.pyc
+
+# Rust build artifacts (regenerate with: cd nifty_backtest_rs && maturin develop --release)
+nifty_backtest_rs/target/
+
+# Node / frontend
+frontend/node_modules/
+frontend/dist/
+
+# Raw NSE bhavcopy cache (huge, ~1.4GB, regenerate with: python run_pipeline.py)
+raw_data/
+
+# OS / editor
+.DS_Store
+Thumbs.db
+
+# Leftover installers
+rustup-init*.exe

@@ -1,0 +1,304 @@
+/*
+  ALL the colors/spacing/fonts for the dashboard live here as CSS
+  variables, at the very top. To re-theme the whole app (e.g. swap the
+  accent color, or lighten the background), you only ever need to edit
+  the values in :root -- nothing else in this file, or in any component,
+  needs to change.
+*/
+:root {
+  --bg: #0d0f14;
+  --bg-panel: #161922;
+  --bg-panel-hover: #1c202c;
+  --border: #262b38;
+  --text: #e8eaf0;
+  --text-muted: #8b93a7;
+
+  --accent: #5b8def; /* primary blue, used for the equity line + buttons */
+  --good: #3ddc97; /* green, for positive numbers */
+  --bad: #ff6b6b; /* red, for negative numbers / drawdown */
+
+  --radius: 12px;
+  --spacing: 20px;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: "Segoe UI", Inter, system-ui, -apple-system, sans-serif;
+  font-size: 15px;
+}
+
+.app {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: var(--spacing) var(--spacing) 60px;
+}
+
+/* ---------- Header ---------- */
+
+.app-header {
+  padding: 12px 0 24px;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 28px;
+}
+
+.app-header h1 {
+  margin: 0 0 6px;
+  font-size: 26px;
+  letter-spacing: -0.02em;
+}
+
+.app-subtitle {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 14px;
+}
+
+/* ---------- Loading / error states ---------- */
+
+.status-screen {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  color: var(--text-muted);
+  background: var(--bg);
+}
+
+.status-hint {
+  font-size: 13px;
+  font-family: monospace;
+}
+
+/* ---------- Metrics comparison (tuning vs test, side by side) ---------- */
+
+.metrics-comparison {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--spacing);
+  margin-bottom: 36px;
+}
+
+@media (max-width: 760px) {
+  .metrics-comparison {
+    grid-template-columns: 1fr;
+  }
+}
+
+.period-column {
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 20px;
+}
+
+.period-header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  margin-bottom: 14px;
+}
+
+.period-header h2 {
+  margin: 0;
+  font-size: 17px;
+}
+
+.period-subtitle {
+  color: var(--text-muted);
+  font-size: 13px;
+}
+
+.total-return {
+  font-size: 34px;
+  font-weight: 600;
+  margin-bottom: 18px;
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+}
+
+.total-return-label {
+  font-size: 13px;
+  font-weight: 400;
+  color: var(--text-muted);
+}
+
+.metric-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 12px;
+}
+
+.metric-card {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 14px;
+}
+
+.metric-card-label {
+  color: var(--text-muted);
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  margin-bottom: 6px;
+}
+
+.metric-card-value {
+  font-size: 22px;
+  font-weight: 600;
+}
+
+.tone-good {
+  color: var(--good);
+}
+
+.tone-bad {
+  color: var(--bad);
+}
+
+.tone-neutral {
+  color: var(--text);
+}
+
+/* ---------- Period toggle (tuning/test switch below the comparison) ---------- */
+
+.period-toggle {
+  display: inline-flex;
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 4px;
+  margin-bottom: 20px;
+}
+
+.toggle-btn {
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  padding: 8px 20px;
+  border-radius: 999px;
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 500;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+
+.toggle-btn.active {
+  background: var(--accent);
+  color: #0d0f14;
+}
+
+.toggle-btn:not(.active):hover {
+  color: var(--text);
+}
+
+/* ---------- Chart + table panels ---------- */
+
+.chart-grid {
+  display: grid;
+  grid-template-columns: 1.4fr 1fr;
+  gap: var(--spacing);
+  margin-bottom: var(--spacing);
+}
+
+@media (max-width: 900px) {
+  .chart-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.panel {
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 20px;
+  margin-bottom: var(--spacing);
+}
+
+.panel h3 {
+  margin: 0 0 14px;
+  font-size: 15px;
+  color: var(--text-muted);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.chart-empty {
+  color: var(--text-muted);
+  text-align: center;
+  padding: 40px 0;
+}
+
+/* ---------- Trade table ---------- */
+
+.trade-search {
+  width: 100%;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--text);
+  padding: 10px 14px;
+  font-size: 14px;
+  margin-bottom: 14px;
+}
+
+.trade-search:focus {
+  outline: 1px solid var(--accent);
+}
+
+.trade-table-scroll {
+  overflow-x: auto;
+}
+
+.trade-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+  white-space: nowrap;
+}
+
+.trade-table th {
+  text-align: left;
+  color: var(--text-muted);
+  font-weight: 600;
+  text-transform: uppercase;
+  font-size: 11px;
+  letter-spacing: 0.03em;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--border);
+  cursor: pointer;
+  user-select: none;
+}
+
+.trade-table th:hover {
+  color: var(--text);
+}
+
+.sort-arrow {
+  color: var(--accent);
+}
+
+.trade-table td {
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--border);
+}
+
+.trade-table tbody tr:hover {
+  background: var(--bg-panel-hover);
+}
+
+.trade-table-empty {
+  text-align: center;
+  color: var(--text-muted);
+  padding: 24px;
+}
