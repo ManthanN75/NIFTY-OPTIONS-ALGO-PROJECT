@@ -143,7 +143,9 @@ def download_range(start: date, end: date, dest_dir: Path = RAW_DIR) -> list[Pat
 
 
 if __name__ == "__main__":
-    # Example: download the last 8 months up to today, when run directly.
+    # Example: download the last 10 months up to today, when run directly.
+    # (run_pipeline.py is the normal entry point and controls this properly --
+    # this is just a standalone fallback if you run this file on its own.)
     today = date.today()
-    eight_months_ago = today - timedelta(days=8 * 30)
-    download_range(eight_months_ago, today)
+    ten_months_ago = today - timedelta(days=10 * 30)
+    download_range(ten_months_ago, today)

@@ -1,9 +1,10 @@
 # Nifty Options Data Pipeline (for beginners)
 
-This project downloads 8 months of historical Nifty **index options** data
+This project downloads 10 months of historical Nifty **index options** data
 for free from NSE, cleans it up, calculates Implied Volatility, and splits
-it into a `tuning_data.csv` (first 4 months) and `test_data.csv` (last 4
-months) that you can use to build and test a trading strategy or model.
+it into a `tuning_data.csv` (first 4 months) and `test_data.csv` (remaining
+~6 months) that you can use to build and test a trading strategy or model.
+It's a deliberately uneven split, not 50/50 — see section 6 for why.
 
 ## 1. Some finance basics first
 
@@ -72,7 +73,7 @@ these edge cases.
 | `run_pipeline.py` | Runs all three steps in order — **this is the one you run** |
 | `raw_data/` | Cache of raw downloaded files (so re-runs are fast) |
 | `tuning_data.csv` | Output: first ~4 months of cleaned data |
-| `test_data.csv` | Output: last ~4 months of cleaned data |
+| `test_data.csv` | Output: remaining ~6 months of cleaned data |
 
 ## 5. How to run it
 
@@ -81,7 +82,7 @@ pip install -r requirements.txt
 python run_pipeline.py
 ```
 
-This will take a while — it's about 170 individual daily downloads for 8
+This will take a while — it's about 200+ individual daily downloads for 10
 months of trading days, with a small polite delay between each so we don't
 hammer NSE's server. If you re-run it later, previously downloaded days in
 `raw_data/` are reused automatically, so it'll be much faster the second
@@ -102,7 +103,7 @@ this folder with these columns:
 | `open_interest` | Number of open (not yet closed) contracts — a popularity/liquidity signal |
 | `volume` | Number of contracts traded that day |
 
-## 6. Why the tuning/test split
+## 6. Why the tuning/test split (and why it's 4/6, not 4/4)
 
 If you build a strategy and only ever test it on the same data you built
 it with, you'll fool yourself into thinking it works better than it
@@ -110,14 +111,25 @@ really does (this is called **overfitting**). So:
 
 - Use `tuning_data.csv` (the older 4 months) to build and adjust your
   strategy or model.
-- Only run it once, at the end, on `test_data.csv` (the newer 4 months)
-  to get an honest read on how it would have performed on data it never
-  saw during development.
+- Only run it once, at the end, on `test_data.csv` (the remaining ~6
+  months) to get an honest read on how it would have performed on data it
+  never saw during development.
+
+This project originally used an even 4-month/4-month split (8 months of
+data total). It was changed to 4 tuning / 6 test (10 months total)
+because 4 months of tuning data only ever produced a handful of trades per
+setting tried — too few to trust a "best" parameter choice, and too few
+test-period trades to trust the resulting metrics either. More
+out-of-sample test months gives a sturdier read on whether a strategy
+actually holds up, at the cost of having less data to search over while
+tuning.
 
 ## 7. Customizing
 
-- Change the date range: edit `months_back` in `run_pipeline.py`'s
-  `main()` function, or call `download_range(start_date, end_date)` from
-  `download_bhavcopy.py` directly with your own dates.
+- Change the date range or split: `run_pipeline.py`'s `main()` takes
+  `months_back` (default 10) and `tuning_months` (default 4, from
+  `split_and_save.py`'s `TUNING_MONTHS`) — the rest of the months become
+  `test_data.csv`. You can also call `download_range(start_date, end_date)`
+  from `download_bhavcopy.py` directly with your own dates.
 - Change the assumed risk-free interest rate used in the IV calculation:
   edit `RISK_FREE_RATE` in `clean_and_iv.py`.
