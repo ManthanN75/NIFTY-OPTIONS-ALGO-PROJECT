@@ -34,18 +34,39 @@ fn nearest_strike(target: i64, strikes: &[i64]) -> Option<i64> {
     strikes.iter().min_by_key(|&&s| (s - target).abs()).copied()
 }
 
+/// Look up a leg's price, but ONLY if it actually traded that day (volume
+/// >= min_volume). A contract nobody traded still has a "close" price in
+/// NSE's bhavcopy -- it's just frozen/stale, not a real tradeable price --
+/// so we treat it exactly like a missing price. This mirrors the fix in
+/// option_lookup.OptionPriceLookup.price() (see that file's docstring for
+/// the bug this fixes: illiquid, zero-volume legs were inflating win rate).
+fn liquid_price(
+    price_map: &HashMap<(i64, i64, i64, u8), f64>,
+    volume_map: &HashMap<(i64, i64, i64, u8), i64>,
+    min_volume: i64,
+    key: (i64, i64, i64, u8),
+) -> Option<f64> {
+    let volume = *volume_map.get(&key)?;
+    if volume < min_volume {
+        return None;
+    }
+    price_map.get(&key).copied()
+}
+
 /// What it would cost to close the position today using TRADED prices.
 /// Returns None if any of the 4 legs has no price today (illiquid day) --
 /// mirrors iron_condor_backtest._cost_to_close_market().
 fn cost_to_close_market(
     price_map: &HashMap<(i64, i64, i64, u8), f64>,
+    volume_map: &HashMap<(i64, i64, i64, u8), i64>,
+    min_volume: i64,
     date: i64,
     pos: &Position,
 ) -> Option<f64> {
-    let sc = *price_map.get(&(date, pos.expiry, pos.short_call_strike, 0))?;
-    let sp = *price_map.get(&(date, pos.expiry, pos.short_put_strike, 1))?;
-    let lc = *price_map.get(&(date, pos.expiry, pos.long_call_strike, 0))?;
-    let lp = *price_map.get(&(date, pos.expiry, pos.long_put_strike, 1))?;
+    let sc = liquid_price(price_map, volume_map, min_volume, (date, pos.expiry, pos.short_call_strike, 0))?;
+    let sp = liquid_price(price_map, volume_map, min_volume, (date, pos.expiry, pos.short_put_strike, 1))?;
+    let lc = liquid_price(price_map, volume_map, min_volume, (date, pos.expiry, pos.long_call_strike, 0))?;
+    let lp = liquid_price(price_map, volume_map, min_volume, (date, pos.expiry, pos.long_put_strike, 1))?;
     Some((sc + sp) - (lc + lp))
 }
 
@@ -71,6 +92,8 @@ fn try_enter_iron_condor(
     date: i64,
     spot: f64,
     price_map: &HashMap<(i64, i64, i64, u8), f64>,
+    volume_map: &HashMap<(i64, i64, i64, u8), i64>,
+    min_volume: i64,
     strikes_by_date_expiry: &HashMap<(i64, i64), Vec<i64>>,
     expiries_by_date: &HashMap<i64, Vec<i64>>,
     short_call_otm_pct: f64,
@@ -116,10 +139,10 @@ fn try_enter_iron_condor(
         return None;
     }
 
-    let sc_price = *price_map.get(&(date, expiry, short_call_strike, 0))?;
-    let sp_price = *price_map.get(&(date, expiry, short_put_strike, 1))?;
-    let lc_price = *price_map.get(&(date, expiry, long_call_strike, 0))?;
-    let lp_price = *price_map.get(&(date, expiry, long_put_strike, 1))?;
+    let sc_price = liquid_price(price_map, volume_map, min_volume, (date, expiry, short_call_strike, 0))?;
+    let sp_price = liquid_price(price_map, volume_map, min_volume, (date, expiry, short_put_strike, 1))?;
+    let lc_price = liquid_price(price_map, volume_map, min_volume, (date, expiry, long_call_strike, 0))?;
+    let lp_price = liquid_price(price_map, volume_map, min_volume, (date, expiry, long_put_strike, 1))?;
 
     let entry_credit = (sc_price + sp_price) - (lc_price + lp_price);
     if entry_credit <= 0.0 {
@@ -154,6 +177,8 @@ fn run_account_backtest_rs(
     opt_strikes_centi: Vec<i64>,
     opt_types: Vec<u8>, // 0 = CE, 1 = PE
     opt_closes: Vec<f64>,
+    opt_volumes: Vec<i64>,
+    min_volume: i64,
     spot_dates: Vec<i64>,
     spot_values: Vec<f64>,
     signal_dates: Vec<i64>,
@@ -173,17 +198,24 @@ fn run_account_backtest_rs(
 ) -> PyResult<(Vec<Py<PyDict>>, f64)> {
     // --- Rebuild the lookup tables (same shape as option_lookup.py's) ---
     let mut price_map: HashMap<(i64, i64, i64, u8), f64> = HashMap::new();
+    let mut volume_map: HashMap<(i64, i64, i64, u8), i64> = HashMap::new();
     let mut strikes_set: HashMap<(i64, i64), HashSet<i64>> = HashMap::new();
     let mut expiries_set: HashMap<i64, HashSet<i64>> = HashMap::new();
 
     for i in 0..opt_dates.len() {
         let key = (opt_dates[i], opt_expiries[i], opt_strikes_centi[i], opt_types[i]);
         price_map.insert(key, opt_closes[i]);
+        volume_map.insert(key, opt_volumes[i]);
 
-        strikes_set
-            .entry((opt_dates[i], opt_expiries[i]))
-            .or_insert_with(HashSet::new)
-            .insert(opt_strikes_centi[i]);
+        // Only offer up a strike as a candidate to trade if it actually
+        // traded that day -- mirrors option_lookup.strikes_available()'s
+        // liquidity filter in the Python version.
+        if opt_volumes[i] >= min_volume {
+            strikes_set
+                .entry((opt_dates[i], opt_expiries[i]))
+                .or_insert_with(HashSet::new)
+                .insert(opt_strikes_centi[i]);
+        }
 
         expiries_set
             .entry(opt_dates[i])
@@ -191,9 +223,20 @@ fn run_account_backtest_rs(
             .insert(opt_expiries[i]);
     }
 
+    // Sort each strike list ascending -- Rust's HashSet has no defined
+    // iteration order (it can even differ between runs of the same
+    // program), so without sorting, a tie in nearest_strike() (two
+    // strikes equally close to the target) could resolve differently
+    // than the Python engine, or even differently run to run. Sorting
+    // makes tie-breaking deterministic and matches Python's behavior
+    // (option_lookup.py builds its strike lists via sorted(set(...))).
     let strikes_by_date_expiry: HashMap<(i64, i64), Vec<i64>> = strikes_set
         .into_iter()
-        .map(|(k, v)| (k, v.into_iter().collect()))
+        .map(|(k, v)| {
+            let mut strikes: Vec<i64> = v.into_iter().collect();
+            strikes.sort_unstable();
+            (k, strikes)
+        })
         .collect();
     let expiries_by_date: HashMap<i64, Vec<i64>> = expiries_set
         .into_iter()
@@ -230,7 +273,7 @@ fn run_account_backtest_rs(
                     reason = Some("expiry");
                 }
             } else {
-                exit_cost = cost_to_close_market(&price_map, date, &pos);
+                exit_cost = cost_to_close_market(&price_map, &volume_map, min_volume, date, &pos);
                 if let Some(ec) = exit_cost {
                     let pnl_now = pos.entry_credit - ec;
                     if pnl_now >= profit_target_pct * pos.entry_credit {
@@ -279,6 +322,8 @@ fn run_account_backtest_rs(
                             date,
                             s,
                             &price_map,
+                            &volume_map,
+                            min_volume,
                             &strikes_by_date_expiry,
                             &expiries_by_date,
                             short_call_otm_pct,

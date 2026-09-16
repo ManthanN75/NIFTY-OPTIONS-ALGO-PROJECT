@@ -5,3 +5,4 @@ requests>=2.31
 matplotlib>=3.7
 fastapi>=0.110
 uvicorn[standard]>=0.29
+openpyxl>=3.1

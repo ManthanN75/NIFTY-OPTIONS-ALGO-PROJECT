@@ -19,6 +19,7 @@ from datetime import date
 import pandas as pd
 
 from iv_rank import AtmIvConfig, build_iv_metrics
+from option_lookup import DEFAULT_MIN_VOLUME
 from strategy_config import StrategyConfig
 
 
@@ -31,7 +32,8 @@ def _to_ordinal(ts) -> int:
 
 def run_account_backtest_rust(df: pd.DataFrame, config: StrategyConfig = None,
                                starting_balance: float = 500_000.0,
-                               lot_size: int = 75) -> tuple[pd.DataFrame, float]:
+                               lot_size: int = 75,
+                               min_volume: int = DEFAULT_MIN_VOLUME) -> tuple[pd.DataFrame, float]:
     # Importing here (not at the top of the file) gives a clearer error
     # message if the Rust extension hasn't been built yet.
     try:
@@ -69,10 +71,12 @@ def run_account_backtest_rust(df: pd.DataFrame, config: StrategyConfig = None,
     opt_strikes_centi = [int(round(s * 100)) for s in df["strike"]]
     opt_types = [0 if t == "CE" else 1 for t in df["option_type"]]  # 0=CE, 1=PE
     opt_closes = [float(c) for c in df["close"]]
+    opt_volumes = [int(v) for v in df["volume"]]
 
     trades, final_balance = run_account_backtest_rs(
         trading_days,
         opt_dates, opt_expiries, opt_strikes_centi, opt_types, opt_closes,
+        opt_volumes, int(min_volume),
         spot_dates, spot_values,
         signal_dates, signal_values,
         entry_cfg.iv_threshold,
