@@ -1,135 +1,124 @@
-# Nifty Options Data Pipeline (for beginners)
+# Nifty Iron Condor Backtest
 
-This project downloads 10 months of historical Nifty **index options** data
-for free from NSE, cleans it up, calculates Implied Volatility, and splits
-it into a `tuning_data.csv` (first 4 months) and `test_data.csv` (remaining
-~6 months) that you can use to build and test a trading strategy or model.
-It's a deliberately uneven split, not 50/50 — see section 6 for why.
+A backtesting project for a systematic options-selling strategy on Nifty index options: sell an iron condor when implied volatility is unusually high relative to its own recent history.
 
-## 1. Some finance basics first
+The stack is a Python data pipeline, a Rust backtest loop exposed through PyO3, a FastAPI backend and a React dashboard, all running on free NSE end-of-day data. It is a research prototype. No real money or broker connection is involved.
 
-- **Nifty 50** is India's main stock market index — basically a single
-  number that tracks the average performance of the 50 biggest companies
-  listed on NSE.
-- An **option** is a contract, not a stock. It gives you the *right* (but
-  not the obligation) to buy or sell the Nifty index at a fixed price (the
-  **strike price**) on or before a fixed date (the **expiry**).
-  - **CE (Call)** = right to **buy** at the strike. You'd want this if you
-    think Nifty is going **up**.
-  - **PE (Put)** = right to **sell** at the strike. You'd want this if you
-    think Nifty is going **down**.
-- The **close price** is what the option last traded for that day — this
-  is the "cost" of the option contract.
-- **Implied Volatility (IV)** is the market's built-in guess of how much
-  Nifty will swing up or down before expiry, shown as a %. It isn't
-  published directly anywhere for historical data — we calculate
-  ("imply") it ourselves from the close price using a formula called
-  **Black-Scholes** (explained more below). Higher IV = market expects
-  bigger swings = option costs more.
-- **Bhavcopy** is NSE's official free daily report of every trade. It's
-  the source of all the raw data here.
+![Before vs after the fix](before_after_linkedin.png)
 
-## 2. Where the data comes from
+## Headline result
 
-NSE publishes a free daily "Derivatives Bhavcopy" file (no login, no paid
-API) at a public URL. It contains every stock and index future/option
-traded that day. We download it, then keep only the rows where the symbol
-is `NIFTY` and the instrument type is "Index Options".
+24 months of NSE data (Sep 2024 - Sep 2026), fixed settings, no re-tuning:
 
-Two libraries are commonly recommended for this (`nsepython`,
-`jugaad-data`), but at the time of building this, NSE had changed its file
-format and neither library's option-download function was working. So
-this project talks to NSE's public file server directly using the same
-approach those libraries use under the hood (`requests` + browser-like
-headers) — this was tested and confirmed working.
+| Metric | Value |
+|---|---|
+| Trades | 12 |
+| Win rate | 58.3% |
+| Total return | -1.29% |
+| Sharpe ratio (per trade, not annualized) | -0.09 |
+| Max drawdown | -3.16% |
+| Profit factor | 0.80 |
 
-## 3. Why we calculate IV ourselves
+![Equity curve, 24 months](equity_curve_24m.png)
 
-Historical bhavcopy files give us the option's **price**, not its IV. IV
-only shows up on NSE's *live* option-chain webpage, which only shows
-"right now" — there's no free historical IV feed. So we reverse-engineer
-it: Black-Scholes normally goes `(strike, spot price, time left, interest
-rate, volatility) → option price`. We plug in everything we know (strike,
-spot, time left, price) and solve backwards for the one unknown:
-volatility. This is exactly what NSE's own website and every broker
-platform do — there's nothing unusual about it, it's standard practice.
+This is not a profitable strategy yet, and 12 trades is far too few to claim an edge. What the project does establish is that the backtest itself can be trusted, which is the reason the bug below matters.
 
-**A note on data quality:** for some options — usually deep
-in-the-money options very close to expiry — the calculated IV will be
-missing (`NaN`). This happens when the option's last traded price and the
-index's final closing price were recorded at very slightly different
-moments during the day, making the numbers briefly inconsistent with the
-pricing formula. This is a normal quirk of free end-of-day data, not a
-bug — expect roughly 15-25% of rows to have a missing IV, concentrated in
-these edge cases.
+## The bug that made the first results wrong
 
-## 4. Files in this project
+An early run on a 6-month test window showed an 80% win rate (+Rs 61,166). Auditing the trade log by hand showed why: NSE's bhavcopy lists a "close" price for every contract, including contracts nobody traded that day, where the price is just the last one carried forward. The backtest used those frozen prices as if they were tradeable, so it could "buy back" a leg at a price that never existed and book profit on it.
+
+One leg, for example, was priced 204.00 at entry and exactly 204.00 two days later, with volume 0 on the second day.
+
+**Fix:** a leg's price is only trusted if the contract actually traded that day (`min_volume`, default 1). Otherwise it is treated as missing, exactly like a price that wasn't available. See `option_lookup.py` (Python) and `liquid_price()` in `nifty_backtest_rs/src/lib.rs` (Rust).
+
+Same data and settings, before and after:
+
+| | Trades | Win rate | P&L |
+|---|---|---|---|
+| Before fix | 5 | 80% | +Rs 61,166 |
+| After fix | 3 | 33% | -Rs 8,179 |
+
+**Second bug, found while cross-checking the two engines:** the Python and Rust versions disagreed on one trade. Two strikes were equally close to the target, and Rust's `HashSet` has no defined iteration order, so it could pick a different one. Strike lists are now sorted deterministically in both engines, and they produce identical results.
+
+## The strategy
+
+- **Signal:** each day, compute Nifty's at-the-money implied volatility, then its IV Rank over a 20-day lookback. Enter when IV Rank crosses above 80 (a fresh cross, not just "is above").
+- **Trade:** sell an iron condor. Short call and put are placed 3% out-of-the-money, and the long hedges are 200 points further out. The expiry is chosen around 30 days out.
+- **Exits, whichever comes first:**
+  - profit target: 50% of the credit received
+  - stop-loss: loss reaches 2x the credit received
+  - forced exit at expiry, settled by intrinsic value against spot
+- **Sizing:** one position at a time, a lot size of 75, and an imaginary Rs 5,00,000 account.
+
+Implied volatility is not published historically by NSE, so it is computed from each option's closing price with Black-Scholes (`clean_and_iv.py`). Roughly 15-25% of rows end up with no IV, mostly deep in-the-money options near expiry where the closing price and index close are inconsistent. That is a normal quirk of free end-of-day data.
+
+## Caveats
+
+- The settings (IV threshold 80, profit target 50%) were picked earlier from a grid search on a 10-month tuning window (`tuning_data.csv`, `test_data.csv`). The 24-month run overlaps that window, so treat it as a verification of a fixed rule set, not a pure out-of-sample test.
+- Trades are priced at the daily close. Real fills, slippage and brokerage are not modelled.
+- The dashboard (`frontend/` + `api.py`) currently shows the 10-month tuning/test split. The 24-month results live in `results_24m.xlsx`.
+
+## Project structure
 
 | File | What it does |
 |---|---|
-| `download_bhavcopy.py` | Downloads raw daily NSE files into `raw_data/` |
-| `clean_and_iv.py` | Cleans the raw data, filters to Nifty options, calculates IV |
-| `split_and_save.py` | Splits the cleaned data by date into two CSVs |
-| `run_pipeline.py` | Runs all three steps in order — **this is the one you run** |
-| `raw_data/` | Cache of raw downloaded files (so re-runs are fast) |
-| `tuning_data.csv` | Output: first ~4 months of cleaned data |
-| `test_data.csv` | Output: remaining ~6 months of cleaned data |
+| `download_bhavcopy.py` | Downloads NSE's daily derivatives bhavcopy into `raw_data/` |
+| `clean_and_iv.py` | Filters to Nifty index options, cleans rows, computes IV |
+| `split_and_save.py`, `run_pipeline.py` | 10-month download, cleaned data, 4-month tuning / 6-month test split |
+| `build_full_dataset.py` | Builds the single 24-month dataset (`data_24m.csv`) |
+| `iv_rank.py` | ATM IV series, IV Rank and IV Percentile |
+| `strategy_config.py` | All entry/exit thresholds in one place |
+| `option_lookup.py` | Fast price lookups, with the volume filter |
+| `iron_condor_backtest.py`, `account_backtest.py` | Python engine (reference implementation) |
+| `nifty_backtest_rs/`, `rust_bridge.py` | Rust engine via PyO3, cross-checked against the Python one |
+| `grid_search.py`, `evaluate_on_test.py` | Tuning grid and the one-time test evaluation |
+| `run_24m_backtest.py` | Full 24-month run, writes `results_24m.xlsx` and charts |
+| `performance_report.py`, `export_excel.py` | Metrics, charts and Excel export |
+| `api.py`, `frontend/` | FastAPI backend and React dashboard |
+| `make_before_after_chart.py` | Builds the before/after image above |
 
-## 5. How to run it
+## Running it
 
 ```bash
+python -m venv .venv
+.venv\Scripts\activate            # Windows
 pip install -r requirements.txt
-python run_pipeline.py
+pip install maturin
+cd nifty_backtest_rs && maturin develop --release && cd ..
 ```
 
-This will take a while — it's about 200+ individual daily downloads for 10
-months of trading days, with a small polite delay between each so we don't
-hammer NSE's server. If you re-run it later, previously downloaded days in
-`raw_data/` are reused automatically, so it'll be much faster the second
-time.
+**Quick start with the committed data** (no download needed):
 
-When it finishes, you'll have `tuning_data.csv` and `test_data.csv` in
-this folder with these columns:
+```python
+import pandas as pd
+from rust_bridge import run_account_backtest_rust
+from run_24m_backtest import build_config
 
-| Column | Meaning |
-|---|---|
-| `date` | The trading day |
-| `strike` | The strike price of the option |
-| `option_type` | `CE` (call) or `PE` (put) |
-| `expiry` | The date the option contract expires |
-| `close` | The option's closing (last traded) price that day |
-| `implied_volatility` | Our calculated IV, as a percentage |
-| `underlying_close` | Nifty index's closing value that day (used to calculate IV) |
-| `open_interest` | Number of open (not yet closed) contracts — a popularity/liquidity signal |
-| `volume` | Number of contracts traded that day |
+df = pd.read_csv("data_24m.csv", parse_dates=["date", "expiry"])
+trade_log, final_balance = run_account_backtest_rust(df, build_config(), 500_000, 75)
+print(trade_log)
+```
 
-## 6. Why the tuning/test split (and why it's 4/6, not 4/4)
+**Rebuild everything from scratch** (downloads several GB of raw NSE files into `raw_data/`, which is gitignored):
 
-If you build a strategy and only ever test it on the same data you built
-it with, you'll fool yourself into thinking it works better than it
-really does (this is called **overfitting**). So:
+```bash
+python -c "from datetime import date, timedelta; from download_bhavcopy import download_range; e = date.today() - timedelta(days=1); download_range(e - timedelta(days=720), e)"
+python run_24m_backtest.py
+```
 
-- Use `tuning_data.csv` (the older 4 months) to build and adjust your
-  strategy or model.
-- Only run it once, at the end, on `test_data.csv` (the remaining ~6
-  months) to get an honest read on how it would have performed on data it
-  never saw during development.
+**Dashboard:**
 
-This project originally used an even 4-month/4-month split (8 months of
-data total). It was changed to 4 tuning / 6 test (10 months total)
-because 4 months of tuning data only ever produced a handful of trades per
-setting tried — too few to trust a "best" parameter choice, and too few
-test-period trades to trust the resulting metrics either. More
-out-of-sample test months gives a sturdier read on whether a strategy
-actually holds up, at the cost of having less data to search over while
-tuning.
+```bash
+uvicorn api:app --reload          # terminal 1
+cd frontend && npm install && npm run dev   # terminal 2
+```
 
-## 7. Customizing
+See `README_RUST.md` for the PyO3/maturin setup in more detail.
 
-- Change the date range or split: `run_pipeline.py`'s `main()` takes
-  `months_back` (default 10) and `tuning_months` (default 4, from
-  `split_and_save.py`'s `TUNING_MONTHS`) — the rest of the months become
-  `test_data.csv`. You can also call `download_range(start_date, end_date)`
-  from `download_bhavcopy.py` directly with your own dates.
-- Change the assumed risk-free interest rate used in the IV calculation:
-  edit `RISK_FREE_RATE` in `clean_and_iv.py`.
+## Some finance terms
+
+- **Iron condor:** sell an out-of-the-money call and put, and buy a further out-of-the-money call and put as hedges. You collect a credit up front and profit if Nifty stays inside the short strikes. The hedges cap the maximum loss.
+- **Implied volatility (IV):** the market's guess of how much Nifty will move, backed out of option prices.
+- **IV Rank:** where today's IV sits between the lowest and highest IV of the lookback window, from 0 to 100.
+- **Profit factor:** total rupees won divided by total rupees lost. Below 1 means more was lost than won.
+- **Bhavcopy:** NSE's free official end-of-day trade report.
