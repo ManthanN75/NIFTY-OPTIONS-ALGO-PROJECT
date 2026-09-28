@@ -129,8 +129,8 @@ trade_log, final_balance = run_account_backtest_rust(df, StrategyConfig.default(
 
 ## 6. Checking it matches the Python version
 
-Since this is meant to be a faster drop-in replacement, sanity-check that
-both versions agree before trusting the Rust one for anything important:
+The Rust engine is a second implementation of the same logic, so it is
+worth checking that both versions agree:
 
 ```python
 import pandas as pd
@@ -152,9 +152,9 @@ print(py_trades)
 print(rs_trades)
 ```
 
-They should produce identical trades and identical final balances — this
-was run for real on `tuning_data.csv` and confirmed matching (3 trades,
-final balance Rs 5,42,843.75 both ways).
+They should produce identical trades and identical final balances. If they
+ever differ, look for an ordering or tie-breaking difference first: that is
+exactly what the two real bugs were (see the main README).
 
 ## 7. If something goes wrong
 
@@ -173,12 +173,22 @@ final balance Rs 5,42,843.75 both ways).
 - Results don't match the Python version: check step 6 above first — that
   comparison will tell you exactly which trade started diverging.
 
-## 8. Why it's faster
+## 8. Is it actually faster? (measured)
 
-Every call in the Python loop — dictionary lookups, `.loc[]` on pandas
-data, attribute access on dataclasses — carries interpreter overhead.
-Rust compiles straight to machine code with no such overhead, and the
-lookup tables here are plain Rust `HashMap`s instead of pandas-backed
-structures. For a small ~80-day backtest the difference won't be
-noticeable, but it matters once you're testing years of data or running
-many parameter combinations (e.g. tuning threshold values by brute force).
+Not on this data. Measured on the 24-month dataset (812,270 rows):
+
+| | Time |
+|---|---|
+| Python engine, end to end | 0.8 s |
+| Rust path, end to end | 3.7 s |
+| of which: converting 812k rows to Python lists for PyO3 | 2.6 s |
+
+Both give identical trades. The Python loop only touches a few hundred
+trading days, so it is already fast, and copying the data across the
+Python/Rust boundary costs more than the loop itself.
+
+The Rust engine is still useful: it is a second, independent implementation
+that caught real bugs by disagreeing with Python (see the main README). A
+speedup would only show if the data were converted once and many parameter
+sets swept, or if NumPy arrays were passed without copying. Neither has been
+measured.

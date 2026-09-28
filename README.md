@@ -12,16 +12,16 @@ The stack is a Python data pipeline, a Rust backtest loop exposed through PyO3, 
 
 | Metric | Value |
 |---|---|
-| Trades | 12 |
-| Win rate | 58.3% |
-| Total return | -1.29% |
-| Sharpe ratio (per trade, not annualized) | -0.09 |
-| Max drawdown | -3.16% |
-| Profit factor | 0.80 |
+| Trades | 11 |
+| Win rate | 54.5% (6 wins, 5 losses) |
+| Total return | -1.65% |
+| Sharpe ratio (per trade, not annualized) | -0.13 |
+| Max drawdown | -3.17% |
+| Profit factor | 0.74 |
 
 ![Equity curve, 24 months](equity_curve_24m.png)
 
-This is not a profitable strategy yet, and 12 trades is far too few to claim an edge. What the project does establish is that the backtest itself can be trusted, which is the reason the bug below matters.
+This is not a profitable strategy yet, and 11 trades is far too few to claim an edge. What the project does establish is that the backtest itself can be trusted, which is the reason the bug below matters.
 
 ## The bug that made the first results wrong
 
@@ -38,7 +38,9 @@ Same data and settings, before and after:
 | Before fix | 5 | 80% | +Rs 61,166 |
 | After fix | 3 | 33% | -Rs 8,179 |
 
-**Second bug, found while cross-checking the two engines:** the Python and Rust versions disagreed on one trade. Two strikes were equally close to the target, and Rust's `HashSet` has no defined iteration order, so it could pick a different one. Strike lists are now sorted deterministically in both engines, and they produce identical results.
+**Second bug, found while cross-checking the two engines:** the Python and Rust versions disagreed on one trade. Two strikes were equally close to the target, and Rust's `HashSet` has no defined iteration order, so it could pick a different one. Strike lists are now sorted in both engines.
+
+**The same bug, missed once:** the expiry list had the identical problem. On 2025-09-24 two expiries were both exactly 4 days from the 30-day target, so the Rust engine picked one at random per process, and identical reruns gave 12 trades or 11 trades. The first 24-month numbers I published came from the lucky branch. Expiries are now sorted too; Rust and Python agree and 8 of 8 fresh runs gave the same result (11 trades, Rs 4,91,765).
 
 ## The strategy
 
@@ -54,7 +56,8 @@ Implied volatility is not published historically by NSE, so it is computed from 
 
 ## Caveats
 
-- The settings (IV threshold 80, profit target 50%) were picked earlier from a grid search on a 10-month tuning window (`tuning_data.csv`, `test_data.csv`). The 24-month run overlaps that window, so treat it as a verification of a fixed rule set, not a pure out-of-sample test.
+- The settings (IV threshold 80, profit target 50%) were picked from a grid search on the 4-month tuning window, run *before* the liquidity fix. Re-running that grid on the fixed engine still ranks 80% / 50% first, but every combination loses money on that window (best: 3 trades, -Rs 5,648). The 24-month run overlaps that window, so treat it as a verification of a fixed rule set, not a pure out-of-sample test.
+- The Rust engine is not faster here. On the 24-month data the pure Python engine finishes in under a second, while the Rust path takes about 3.7 s end to end because converting ~800k rows into lists for PyO3 dominates. A speedup would only show with data converted once and many parameter sweeps, which I have not measured.
 - Trades are priced at the daily close. Real fills, slippage and brokerage are not modelled.
 - The dashboard (`frontend/` + `api.py`) currently shows the 10-month tuning/test split. The 24-month results live in `results_24m.xlsx`.
 

@@ -238,9 +238,17 @@ fn run_account_backtest_rs(
             (k, strikes)
         })
         .collect();
+    // Same reasoning as the strikes above: expiries must be sorted ascending
+    // so a tie in the expiry choice (two expiries equally far from the target
+    // days-to-expiry) always resolves to the earlier one, exactly like the
+    // Python engine, instead of depending on HashSet iteration order.
     let expiries_by_date: HashMap<i64, Vec<i64>> = expiries_set
         .into_iter()
-        .map(|(k, v)| (k, v.into_iter().collect()))
+        .map(|(k, v)| {
+            let mut expiries: Vec<i64> = v.into_iter().collect();
+            expiries.sort_unstable();
+            (k, expiries)
+        })
         .collect();
 
     let spot_map: HashMap<i64, f64> = spot_dates.into_iter().zip(spot_values).collect();

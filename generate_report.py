@@ -66,8 +66,8 @@ def build_report():
     story.append(Paragraph("Architecture", h2))
     story.append(Paragraph(
         "Free NSE bhavcopy data &rarr; Python data pipeline (cleaning, Black-Scholes implied volatility) "
-        "&rarr; Python strategy logic (IV rank, entry/exit rules) &rarr; a hot backtest loop rewritten in "
-        "<b>Rust</b> and exposed to Python via <b>PyO3</b> for speed &rarr; a metrics/reporting layer (Sharpe, "
+        "&rarr; Python strategy logic (IV rank, entry/exit rules) &rarr; the day-by-day backtest loop, also "
+        "implemented in <b>Rust</b> and exposed to Python via <b>PyO3</b> and cross-checked against the Python version &rarr; a metrics/reporting layer (Sharpe, "
         "drawdown, win rate, profit factor) &rarr; a <b>FastAPI</b> backend &rarr; a <b>React</b> dashboard.",
         body))
 
@@ -80,8 +80,9 @@ def build_report():
         "\"buy back\" options at prices nobody could really have gotten, quietly inflating the win rate. "
         "The fix: every option leg now requires real trading volume on that day before its price is trusted, "
         "both when entering a trade and when checking exits &mdash; otherwise it's treated as unavailable, "
-        "exactly like a missing price. A second bug found during the fix (a tie-breaking inconsistency "
-        "between the Python and Rust engines caused by Rust's unordered hash sets) was fixed at the same time.",
+        "exactly like a missing price. Cross-checking the two engines also exposed a second bug: ties in "
+        "strike and expiry selection resolved differently in Rust, because its hash sets have no fixed order, so "
+        "identical reruns could give different trade counts. Both tie-breaks are now deterministic.",
         body))
 
     story.append(Spacer(1, 6))
@@ -103,12 +104,12 @@ def build_report():
 
     story.append(metric_table([
         ["Metric", "Value"],
-        ["Number of trades", "12"],
-        ["Win rate", "58.3%"],
-        ["Total return", "-1.29%"],
-        ["Sharpe ratio (per-trade, not annualized)", "-0.09"],
-        ["Max drawdown", "-3.16%"],
-        ["Profit factor", "0.80"],
+        ["Number of trades", "11"],
+        ["Win rate", "54.5%"],
+        ["Total return", "-1.65%"],
+        ["Sharpe ratio (per-trade, not annualized)", "-0.13"],
+        ["Max drawdown", "-3.17%"],
+        ["Profit factor", "0.74"],
     ]))
     story.append(Spacer(1, 14))
 
@@ -120,9 +121,9 @@ def build_report():
 
     story.append(Paragraph("Honest takeaway", h2))
     story.append(Paragraph(
-        "58.3% win rate with a roughly flat-to-slightly-negative total return (-1.29%) and a Sharpe ratio "
+        "54.5% win rate with a roughly flat-to-slightly-negative total return (-1.65%) and a Sharpe ratio "
         "near zero is a believable, unglamorous result for this style of strategy over this period &mdash; "
-        "not a proven edge, and not a failure either. Twelve trades over 24 months is still a small sample "
+        "not a proven edge, and not a failure either. Eleven trades over 24 months is still a small sample "
         "for statistical confidence. The honest conclusion at this stage: the current entry/exit rules do "
         "not show a clear, reliable edge on this data. The value of this phase of the project was proving "
         "the pipeline is correct and trustworthy end-to-end &mdash; a necessary foundation before iterating "
@@ -131,7 +132,7 @@ def build_report():
     story.append(Paragraph("Tech stack", h2))
     story.append(Paragraph(
         "Python (pandas, NumPy, SciPy) for the data pipeline and IV/Black-Scholes math &middot; Rust + PyO3 "
-        "for the performance-critical backtest loop &middot; FastAPI for the results API &middot; React + "
+        "for a second, cross-checked implementation of the backtest loop &middot; FastAPI for the results API &middot; React + "
         "Vite + Recharts for the dashboard &middot; free NSE bhavcopy data, no paid broker API.", body))
 
     doc.build(story)
